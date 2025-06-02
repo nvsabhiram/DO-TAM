@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tech-intro-page
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tech-intro
+  template:
+    metadata:
+      labels:
+        app: tech-intro
+    spec:
+      containers:
+      - name: web
+        image: mantoniazzz/manish101:latest
+        ports:
+        - containerPort: 80

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tech-intro-service
+  namespace: webapp
+  annotations:
+    service.beta.kubernetes.io/do-loadbalancer-size-unit: "3"
+spec:
+  selector:
+    app: tech-intro
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: LoadBalancer
