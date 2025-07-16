@@ -1,124 +1,173 @@
-# 🚀 Web App Deployment on DigitalOcean Kubernetes
+# Setup Guide: Scalable Static Web App on DigitalOcean Kubernetes (DOKS)
 
-This repository contains a simple static web application containerized using Docker and deployed to a Kubernetes cluster on **DigitalOcean (DOKS)**.
-
-The deployment includes:
-
-- ✅ Docker-based containerization
-- ✅ Kubernetes deployment and service manifests
-- ✅ LoadBalancer to expose the app publicly
-- ✅ Cluster autoscaling configured during cluster creation (min 2, max 3 nodes)
+## Table of Contents
+- [Deployment Flow Diagram](#deployment-flow-diagram)
+- [Pre-requisites](#pre-requisites)
+- [Step 1: Clone and Build Docker Image](#step-1-clone-and-build-docker-image)
+- [Connect DO Registry to DOKS](#connect-do-registry-to-doks)
+- [Step 2: Create a DOKS Cluster](#step-2-create-a-doks-cluster)
+- [Step 3: Connect to the Cluster](#step-3-connect-to-the-cluster)
+- [Step 4: Create Namespace and Deploy App](#step-4-create-namespace-and-deploy-app)
+- [Step 5: Install Metrics Server](#step-5-install-metrics-server)
+- [Step 6: Enable HPA](#step-6-enable-hpa)
+- [Step 7 (Optional): Use DO Spaces and CDN](#step-7-optional-use-do-spaces-and-cdn)
+- [Cost and Performance Summary](#cost-and-performance-summary)
 
 ---
 
-## 📁 Project Structure
+## Deployment Flow Diagram
 
 ```
-.
-├── index.html           # Static webpage
-├── Dockerfile           # Docker build instructions
-├── deployment.yaml      # Kubernetes Deployment manifest
-├── service.yaml         # Kubernetes LoadBalancer Service manifest
+Developer
+↓
+Docker Image Build and Push (DigitalOcean Registry)
+↓
+DOKS Cluster (Deployment via YAML)
+↓
+Kubernetes Deployment → Pod(s) running NGINX
+↓
+Horizontal Pod Autoscaler (scales pods based on CPU)
+↓
+Kubernetes Service (LoadBalancer)
+↓
+User accesses via EXTERNAL-IP (LoadBalancer)
 ```
 
 ---
 
-## 🧰 Prerequisites
+## Pre-requisites
 
-- A [DigitalOcean](https://www.digitalocean.com/) account
-- [Docker](https://www.docker.com/products/docker-desktop)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)
-- [doctl CLI](https://docs.digitalocean.com/reference/doctl/) (authenticated with your DO account)
-- [Docker Hub](https://hub.docker.com/) account
+- DigitalOcean Account
+- DigitalOcean Kubernetes (DOKS) cluster (2-node minimum)
+- [doctl](https://docs.digitalocean.com/reference/doctl/how-to/install/) installed and authenticated
+- Docker installed and configured
+- DigitalOcean Container Registry (DOCR) created
 
 ---
 
-## 📦 Step-by-Step Deployment Guide
-
-### 1. Clone the Repository
+## Step 1: Clone and Build Docker Image
 
 ```bash
-git clone https://github.com/mantoniazzz/DO_Test_Web_App.git
-cd <your-repo-name>
+git clone https://github.com/nvsabhiram/DO-TAM.git
+cd DO-TAM/webapp
+doctl auth init
+doctl registry login
+docker build -t myapp .
+docker tag myapp registry.digitalocean.com/<your-registry-name>/myapp:1.0
+docker push registry.digitalocean.com/<your-registry-name>/myapp:1.0
 ```
 
 ---
 
-### 2. Build & Push the Docker Image
+## Connect DO Registry to DOKS
+Visit the [registry page](https://cloud.digitalocean.com/registry) and click the Settings tab. In the DigitalOcean Kubernetes integration section, click Edit to display the available Kubernetes clusters. Select the clusters you wish to add and click Save.
+In the control panel, you can select the Kubernetes clusters to use with your registry. This generates a secret, adds it to all the namespaces in the cluster and updates the default service account to include the secret, allowing you to pull images from the registry.
 
-Replace `<your-dockerhub-username>` with your Docker Hub username.
+To pull private container images from your DigitalOcean Container Registry into your DOKS cluster:
 
-```bash
-# Build image
-docker build -t <your-dockerhub-username>/tech-intro-page .
+1. Go to your [DigitalOcean Container Registry](https://cloud.digitalocean.com/registry) dashboard
+2. Click the **Settings** tab
+3. Under **Kubernetes Integration**, click **Edit**
+4. Select your DOKS cluster(s) to integrate
+5. Click **Save**
 
-# Login to Docker Hub
-docker login
+This integration will:
+- Automatically create a Kubernetes Secret for image pulls
+- Patch default service accounts in all namespaces
+- Allow seamless image pulls from the private registry
 
-# Push image
-docker push <your-dockerhub-username>/tech-intro-page
-```
+> [!Note]
+> You can only integrate the latest Kubernetes patch versions (1.19+) with the registry. For more information on upgrading your Kubernetes clusters, see How to Upgrade DOKS Clusters to Newer Versions.
 
----
 
-### 3. Create Kubernetes Cluster on DigitalOcean
 
-Use the DigitalOcean UI or `doctl` to create the cluster with autoscaling:
+## Step 2: Create a DOKS Cluster
+
+### Option A: Using doctl
 
 ```bash
 doctl kubernetes cluster create web-app-cluster \
-  --region <region> \
-  --version <k8s-version> \
-  --min-nodes 2 \
-  --max-nodes 3 \
-  --count 2 \
-  --enable-autoscaling
+--region nyc3 \
+--version 1.33.1-do.1 \
+--count 1 \
+--size s-1vcpu-1gb \
+--enable-autoscaling \
+--min-nodes 1 \
+--max-nodes 2
 ```
 
-Save kubeconfig:
+### Option B: Using DigitalOcean Console
+
+1. Go to [DOKS Console](https://cloud.digitalocean.com/kubernetes)
+2. Click "Create Kubernetes Cluster"
+3. Set:
+   - Region: Your preferred location
+   - Version: Latest stable
+   - Node Pool:
+     - Size: Basic (e.g., s-2vcpu-2gb or smaller)
+     - Autoscaling: Enabled
+     - Min: 2 nodes
+     - Max: 3 nodes
+4. Click "Create Cluster"
+
+---
+
+## Step 3: Connect to the Cluster
 
 ```bash
-doctl kubernetes cluster kubeconfig save tech-intro-page-cluster
-```
-
-Verify cluster access:
-
-```bash
+doctl kubernetes cluster kubeconfig save web-app-cluster
 kubectl get nodes
 ```
 
 ---
 
-### 4. Deploy the Application to Kubernetes
+## Step 4: Create Namespace and Deploy App
 
 ```bash
+kubectl create ns webapp
 kubectl apply -f deployment.yaml
 kubectl apply -f service.yaml
+kubectl get pod -n webapp
 ```
 
-Get external IP:
- From Loadbalancer
-
 ---
 
-## ✅ Summary
-
-| Feature            | Description                               |
-|--------------------|-------------------------------------------|
-| Containerization   | Docker (with NGINX serving static HTML)   |
-| Cluster Platform   | DigitalOcean Kubernetes                   |
-| Autoscaling        | Configured at cluster launch (2–3 nodes)  |
-| Load Balancing     | Service type: LoadBalancer                |
-| Deployment         | Via `kubectl apply` using YAML manifests |
-
----
-
-## 🧹 Cleanup
+## Step 5: Install Metrics Server
 
 ```bash
-kubectl delete -f service.yaml
-kubectl delete -f deployment.yaml
-doctl kubernetes cluster delete web-app-cluster
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 ```
+
+---
+
+## Step 6: Enable HPA
+
+```bash
+kubectl apply -f app-hpa.yaml
+```
+
+---
+
+## Step 7 (Optional): Use DO Spaces and CDN
+
+```bash
+doctl spaces create webapp-space
+doctl spaces upload index.html webapp-space
+```
+
+Enable CDN in DigitalOcean Spaces UI. Use CDN endpoint for static hosting.
+
+
+---
+
+## Cost and Performance Summary
+
+| Optimization Item       | Status  | Notes                             |
+|-------------------------|---------|-----------------------------------|
+| Smallest node size      | Enabled | s-1vcpu-1gb                       |
+| HPA                     | Enabled | Scales pods based on CPU          |
+| Resource limits         | Applied | 10m CPU, 16Mi RAM per pod         |
+| CDN + DO Spaces         | Suggested | Reduces infra to ~$5/month       |
+| Estimated Total Cost    | ~$7–14/month | With CDN: as low as ~$5       |
 
 ---
